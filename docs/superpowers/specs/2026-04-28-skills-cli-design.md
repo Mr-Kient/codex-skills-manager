@@ -7,10 +7,13 @@ Date: 2026-04-28
 The current workflow is implemented in shell functions copied in
 `bash_aliases.example`, backed by `skill_aliases.example`.
 
-Skills are enabled when their directory is under `~/.codex/skills` and
-disabled when their directory is under `~/.codex/skills_disabled`. Toggling a
-skill moves the whole skill directory between those two locations. Alias data is
-stored in `~/.codex/skill_aliases` as whitespace-separated `skill alias` pairs.
+Skills are enabled when their directory is under the configured enabled-skills
+directory and disabled when their directory is under the configured
+disabled-skills directory. By default these directories are `~/.codex/skills`
+and `~/.codex/skills_disabled`. Toggling a skill moves the whole skill directory
+between those two locations. Alias data is stored in the configured alias file,
+defaulting to `~/.codex/skill_aliases`, as whitespace-separated `skill alias`
+pairs.
 Multiple skills can share the same alias, so one alias can represent a batch of
 skills. The existing shell setup also dynamically creates `<alias>-on` and
 `<alias>-off` shell aliases.
@@ -20,9 +23,11 @@ shell aliases and into a portable command-line application.
 
 ## Goals
 
-- Manage external Codex skills under `~/.codex/skills` and
+- Manage external Codex skills under configurable enabled and disabled
+  directories, defaulting to `~/.codex/skills` and
   `~/.codex/skills_disabled`.
-- Preserve the existing `~/.codex/skill_aliases` format.
+- Preserve the existing `~/.codex/skill_aliases` format while allowing the
+  alias file path to be configured.
 - Let users create aliases for skills that do not yet have an explicit alias.
 - Let users modify and delete aliases for skills that already have one.
 - Support batch alias assignment through an interactive multi-select flow.
@@ -56,6 +61,17 @@ This stack is chosen for implementation speed and portability. The code will
 separate core logic from CLI/UI code so that a future Rust rewrite can preserve
 the same command behavior and file semantics.
 
+Development will use `uv` to create and manage the project virtual environment.
+Developers run commands through `uv`, such as `uv sync`, `uv run pytest`, and
+`uv run skills ...`.
+
+Released builds must install a directly runnable `skills` command on `PATH`.
+Normal usage must not require `source .venv/bin/activate`, manual virtual
+environment activation, or invoking the app through `uv run`. The Python package
+will define a console-script entry point named `skills`. Installation supports a
+managed tool environment such as `uv tool install` or `pipx`, but that
+environment remains an implementation detail and is never activated by the user.
+
 ## Command Surface
 
 The command name is `skills`.
@@ -73,6 +89,12 @@ skills alias edit
 skills shell init
 ```
 
+All commands accept shared path options:
+
+```bash
+skills --skills-dir <path> --disabled-dir <path> --alias-file <path> ls
+```
+
 `skills ls` lists external skills with these columns:
 
 ```text
@@ -83,7 +105,7 @@ ALIAS  SKILL  STATUS  DESCRIPTION
 `description:` field in `SKILL.md`, stripped of surrounding quotes, shortened to
 the first sentence when possible, and truncated to a fixed display length.
 
-`skills on` and `skills off` accept one or more targets. Each target may be a
+`skills on` and `skills off` accept one or more targets. Each target can be a
 skill name or an alias. If a target is an alias, the command applies to all
 skills currently mapped to that alias. After moving at least one skill, the CLI
 prints a message telling the user to restart Codex to reload skills.
@@ -105,9 +127,23 @@ the skills mapped to that alias.
 After removal, each skill falls back to using its skill name as its effective
 alias.
 
-`skills shell init` prints shell code for bash or zsh. The generated shell code
-is optional and may define `<alias>-on` and `<alias>-off` convenience functions
-that call `skills on <alias>` and `skills off <alias>`.
+`skills shell init` prints optional shell code for bash or zsh. The generated
+shell code defines `<alias>-on` and `<alias>-off` convenience functions that call
+`skills on <alias>` and `skills off <alias>`.
+
+## Path Configuration
+
+The CLI resolves paths in this order:
+
+1. Command-line options: `--skills-dir`, `--disabled-dir`, and `--alias-file`.
+2. Environment variables: `CODEX_SKILLS_DIR`, `CODEX_SKILLS_DISABLED_DIR`, and
+   `CODEX_SKILL_ALIASES_FILE`.
+3. `CODEX_HOME`, defaulting to `~/.codex`, with derived paths:
+   `$CODEX_HOME/skills`, `$CODEX_HOME/skills_disabled`, and
+   `$CODEX_HOME/skill_aliases`.
+
+The enabled and disabled directories must be different resolved paths. The alias
+file can live outside `CODEX_HOME`.
 
 ## Architecture
 
@@ -115,8 +151,7 @@ The implementation will be split into small modules with stable boundaries.
 
 `skills.store` owns filesystem paths and file IO:
 
-- Resolve `CODEX_HOME`, defaulting to `~/.codex`.
-- Resolve enabled, disabled, and alias config paths.
+- Resolve enabled, disabled, and alias paths using the documented precedence.
 - Read and write `skill_aliases` atomically.
 - Ignore full-line comments and blank lines on read.
 - Write a normalized alias file containing sorted `skill alias` entries.
@@ -176,6 +211,7 @@ The CLI fails with actionable messages and non-zero exit codes for:
 - Conflicting enabled and disabled directories for the same skill.
 - Missing `SKILL.md` for a candidate skill directory.
 - Failed directory moves.
+- Invalid path configuration.
 - Alias file parse errors that would make a write unsafe.
 
 Read-only commands print warnings for line-level alias file issues and still
@@ -197,6 +233,8 @@ Tests will use temporary fake Codex homes instead of the real `~/.codex`.
 Coverage includes:
 
 - Discovering enabled and disabled external skills.
+- Path resolution from CLI options, environment variables, `CODEX_HOME`, and
+  defaults.
 - Ignoring `.system` skills.
 - Parsing descriptions from `SKILL.md`.
 - Preserving the `skill alias` file format.
@@ -207,6 +245,8 @@ Coverage includes:
 - Batch operations with partial no-op targets.
 - Unsafe alias validation.
 - Shell init output for bash and zsh.
+- Installed console script can run as `skills` without virtual environment
+  activation.
 - CLI smoke tests through Typer's test runner.
 
 Interactive flows will be tested at the core boundary by verifying the mutation
@@ -219,6 +259,7 @@ operations stable. If the CLI is later rewritten in Rust, the Rust version can
 reuse the same behavior contract:
 
 - Same `~/.codex` directory layout.
+- Same path configuration precedence.
 - Same `skill_aliases` file format.
 - Same target resolution rules.
 - Same command names and flags listed in this spec.
