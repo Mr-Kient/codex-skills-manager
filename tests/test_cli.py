@@ -54,3 +54,14 @@ def test_alias_without_subcommand_displays_help():
     assert "Manage skill aliases." in result.output
     assert "set" in result.output
     assert "unset" in result.output
+
+
+def test_alias_edit_cancel_exits_cleanly(monkeypatch, fake_codex_home, make_skill):
+    make_skill("one", status="on", description="One.")
+    (fake_codex_home / "skill_aliases").write_text("one group\n", encoding="utf-8")
+    monkeypatch.setattr("codex_skills_cli.cli.select_alias", lambda _aliases: ("", False))
+
+    result = runner.invoke(app, [*_path_args(fake_codex_home), "alias", "edit"])
+
+    assert result.exit_code == 0
+    assert "Cancelled" in result.output

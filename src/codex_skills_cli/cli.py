@@ -104,6 +104,9 @@ def alias_set(ctx: typer.Context) -> None:
     aliases, _ = read_aliases(config.alias_file)
     skills, _ = discover_skills(config, aliases)
     alias_name, _created = select_alias(sorted(set(aliases.values())))
+    if not alias_name:
+        console.print("Cancelled.")
+        raise typer.Exit()
     if not is_alias_safe(alias_name):
         raise typer.BadParameter("alias contains unsafe characters")
     selected = select_skills([skill.name for skill in skills])
