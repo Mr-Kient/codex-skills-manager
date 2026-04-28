@@ -13,5 +13,6 @@ def select_alias(existing_aliases: list[str]) -> tuple[str, bool]:
 
 
 def select_skills(skill_names: list[str], *, preselected: list[str] | None = None) -> list[str]:
-    selected = questionary.checkbox("Choose skills", choices=skill_names, default=preselected or []).ask()
+    kwargs = {"default": preselected} if preselected else {}
+    selected = questionary.checkbox("Choose skills", choices=skill_names, **kwargs).ask()
     return list(selected or [])
