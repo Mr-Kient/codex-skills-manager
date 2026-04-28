@@ -14,7 +14,7 @@ from codex_skills_cli.paths import PathConfig, resolve_paths
 from codex_skills_cli.shell import shell_init
 
 app = typer.Typer(help="Manage external Codex skills and aliases.")
-alias_app = typer.Typer(help="Manage skill aliases.")
+alias_app = typer.Typer(help="Manage skill aliases.", invoke_without_command=True)
 shell_app = typer.Typer(help="Generate shell integration.")
 app.add_typer(alias_app, name="alias")
 app.add_typer(shell_app, name="shell")
@@ -38,6 +38,13 @@ def _config(ctx: typer.Context) -> PathConfig:
         disabled_dir=ctx.obj.get("disabled_dir"),
         alias_file=ctx.obj.get("alias_file"),
     )
+
+
+@alias_app.callback()
+def alias_main(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 
 @app.command("ls")

@@ -45,3 +45,12 @@ def test_shell_init_outputs_helpers(fake_codex_home, make_skill):
 
     assert result.exit_code == 0
     assert "group-on()" in result.output
+
+
+def test_alias_without_subcommand_displays_help():
+    result = runner.invoke(app, ["alias"])
+
+    assert result.exit_code == 0
+    assert "Manage skill aliases." in result.output
+    assert "set" in result.output
+    assert "unset" in result.output
