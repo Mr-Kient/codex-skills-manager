@@ -19,7 +19,7 @@ alias_app = typer.Typer(help="Manage skill aliases.", invoke_without_command=Tru
 shell_app = typer.Typer(help="Generate shell integration.")
 app.add_typer(alias_app, name="alias")
 app.add_typer(shell_app, name="shell")
-console = Console()
+console = Console(width=200)
 
 
 @app.callback()
@@ -82,9 +82,10 @@ def list_skills(ctx: typer.Context) -> None:
     table.add_column("ALIAS")
     table.add_column("SKILL")
     table.add_column("STATUS")
+    table.add_column("DIR", overflow="fold")
     table.add_column("DESCRIPTION")
     for skill in skills:
-        table.add_row(skill.effective_alias, skill.name, skill.status, skill.description)
+        table.add_row(skill.effective_alias, skill.name, skill.status, str(skill.managed_dir), skill.description)
     console.print(table)
 
 
@@ -123,9 +124,13 @@ def alias_ls(ctx: typer.Context) -> None:
     for warning in path_warnings:
         console.print(f"warning: {warning}", style="yellow")
     skills, _ = discover_skills(config, aliases)
-    grouped = group_by_alias([skill.name for skill in skills], aliases)
+    grouped: dict[str, list] = {}
+    for skill in skills:
+        grouped.setdefault(skill.effective_alias, []).append(skill)
     for alias_name, members in grouped.items():
-        console.print(f"{alias_name}: {', '.join(members)}")
+        console.print(f"{alias_name}:")
+        for skill in members:
+            console.print(f"  {skill.name}  {skill.managed_dir}")
 
 
 @alias_app.command("set")

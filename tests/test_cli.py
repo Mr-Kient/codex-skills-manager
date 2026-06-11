@@ -127,3 +127,77 @@ def test_remove_dir_rejects_default(monkeypatch, tmp_path):
 
     assert result.exit_code == 1
     assert "cannot remove default managed skills directory" in result.output
+
+
+def test_ls_displays_dir_column_for_managed_skills(monkeypatch, tmp_path):
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    extra_enabled = tmp_path / "agents" / "skills"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("HOME", str(home))
+    (project / "managed_dirs").write_text(f"{extra_enabled}\n", encoding="utf-8")
+    skill_dir = extra_enabled / "agent-one"
+    skill_dir.mkdir(parents=True)
+    skill_dir.joinpath("SKILL.md").write_text("---\nname: agent-one\ndescription: Agent.\n---\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    assert "DIR" in result.output
+    assert "agent-one" in result.output
+    assert str(extra_enabled) in result.output
+
+
+def test_alias_ls_lists_members_with_dirs(monkeypatch, tmp_path):
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    extra_enabled = tmp_path / "agents" / "skills"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("HOME", str(home))
+    (project / "managed_dirs").write_text(f"{extra_enabled}\n", encoding="utf-8")
+    (project / "skill_aliases").write_text("agent-one group\n", encoding="utf-8")
+    skill_dir = extra_enabled / "agent-one"
+    skill_dir.mkdir(parents=True)
+    skill_dir.joinpath("SKILL.md").write_text("---\nname: agent-one\ndescription: Agent.\n---\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["alias", "ls"])
+
+    assert result.exit_code == 0
+    assert "group:" in result.output
+    assert "agent-one" in result.output
+    assert str(extra_enabled) in result.output
+
+
+def test_alias_set_uses_project_local_skill_aliases(monkeypatch, fake_codex_home, make_skill, tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("CODEX_HOME", str(fake_codex_home))
+    make_skill("one", status="on", description="One.")
+    monkeypatch.setattr("codex_skills_cli.cli.select_alias", lambda _aliases: ("group", True))
+    monkeypatch.setattr("codex_skills_cli.cli.select_skills", lambda _skills: ["one"])
+
+    result = runner.invoke(app, ["alias", "set"])
+
+    assert result.exit_code == 0
+    assert (project / "skill_aliases").read_text(encoding="utf-8") == "one group\n"
+    assert not (fake_codex_home / "skill_aliases").exists()
+
+
+def test_alias_file_override_still_uses_explicit_alias_file(monkeypatch, fake_codex_home, make_skill, tmp_path):
+    project = tmp_path / "project"
+    explicit_aliases = tmp_path / "explicit_aliases"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("CODEX_HOME", str(fake_codex_home))
+    make_skill("one", status="on", description="One.")
+    monkeypatch.setattr("codex_skills_cli.cli.select_alias", lambda _aliases: ("group", True))
+    monkeypatch.setattr("codex_skills_cli.cli.select_skills", lambda _skills: ["one"])
+
+    result = runner.invoke(app, ["--alias-file", str(explicit_aliases), "alias", "set"])
+
+    assert result.exit_code == 0
+    assert explicit_aliases.read_text(encoding="utf-8") == "one group\n"
+    assert not (project / "skill_aliases").exists()
