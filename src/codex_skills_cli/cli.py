@@ -10,6 +10,7 @@ from codex_skills_cli.aliases import group_by_alias, is_alias_safe, read_aliases
 from codex_skills_cli.discovery import discover_skills
 from codex_skills_cli.interactive import select_alias, select_skills
 from codex_skills_cli.managed_dirs import add_managed_dir, remove_managed_dir
+from codex_skills_cli.models import Skill
 from codex_skills_cli.operations import disable_targets, enable_targets
 from codex_skills_cli.paths import PathConfig, resolve_paths
 from codex_skills_cli.shell import shell_init
@@ -19,7 +20,8 @@ alias_app = typer.Typer(help="Manage skill aliases.", invoke_without_command=Tru
 shell_app = typer.Typer(help="Generate shell integration.")
 app.add_typer(alias_app, name="alias")
 app.add_typer(shell_app, name="shell")
-console = Console(width=200)
+console = Console()
+NARROW_TABLE_WIDTH = 80
 
 
 @app.callback()
@@ -78,6 +80,9 @@ def list_skills(ctx: typer.Context) -> None:
     skills, discovery_warnings = discover_skills(config, aliases)
     for warning in [*path_warnings, *warnings, *discovery_warnings]:
         console.print(f"warning: {warning}", style="yellow")
+    if console.width < NARROW_TABLE_WIDTH:
+        _print_skills_stacked(skills)
+        return
     table = Table()
     table.add_column("ALIAS")
     table.add_column("SKILL")
@@ -87,6 +92,16 @@ def list_skills(ctx: typer.Context) -> None:
     for skill in skills:
         table.add_row(skill.effective_alias, skill.name, skill.status, str(skill.managed_dir), skill.description)
     console.print(table)
+
+
+def _print_skills_stacked(skills: list[Skill]) -> None:
+    for index, skill in enumerate(skills):
+        if index:
+            console.print()
+        console.print(f"{skill.name} [{skill.status}]", markup=False)
+        console.print(f"  alias: {skill.effective_alias}", markup=False)
+        console.print(f"  dir: {skill.managed_dir}", markup=False)
+        console.print(f"  description: {skill.description}", markup=False)
 
 
 @app.command("on")

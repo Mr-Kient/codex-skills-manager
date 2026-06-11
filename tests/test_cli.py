@@ -1,4 +1,5 @@
 from typer.testing import CliRunner
+from rich.console import Console
 
 from codex_skills_cli.cli import app
 
@@ -146,7 +147,53 @@ def test_ls_displays_dir_column_for_managed_skills(monkeypatch, tmp_path):
     assert result.exit_code == 0
     assert "DIR" in result.output
     assert "agent-one" in result.output
-    assert str(extra_enabled) in result.output
+    assert "agents" in result.output
+    assert "skills" in result.output
+
+
+def test_ls_table_does_not_force_wide_output_in_captured_terminal(monkeypatch, tmp_path):
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    extra_enabled = tmp_path / "agents" / "skills"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("HOME", str(home))
+    (project / "managed_dirs").write_text(f"{extra_enabled}\n", encoding="utf-8")
+    skill_dir = extra_enabled / "very-long-skill-name"
+    skill_dir.mkdir(parents=True)
+    skill_dir.joinpath("SKILL.md").write_text(
+        "---\nname: very-long-skill-name\ndescription: Long path display.\n---\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    assert max(len(line) for line in result.output.splitlines()) <= 100
+
+
+def test_ls_uses_stacked_output_when_terminal_is_narrow(monkeypatch, tmp_path):
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    extra_enabled = tmp_path / "agents" / "skills"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr("codex_skills_cli.cli.console", Console(width=40))
+    (project / "managed_dirs").write_text(f"{extra_enabled}\n", encoding="utf-8")
+    skill_dir = extra_enabled / "agent-one"
+    skill_dir.mkdir(parents=True)
+    skill_dir.joinpath("SKILL.md").write_text("---\nname: agent-one\ndescription: Agent.\n---\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    assert "agent-one [on]" in result.output
+    assert "alias: agent-one" in result.output
+    assert "dir:" in result.output
+    assert "agents" in result.output
+    assert "skills" in result.output
+    assert "┏" not in result.output
 
 
 def test_alias_ls_lists_members_with_dirs(monkeypatch, tmp_path):
