@@ -4,7 +4,8 @@ import shutil
 from dataclasses import dataclass
 
 from codex_skills_cli.aliases import group_by_alias
-from codex_skills_cli.paths import PathConfig
+from codex_skills_cli.discovery import discover_skills
+from codex_skills_cli.paths import PathConfig, SkillDirPair
 
 
 @dataclass(frozen=True)
@@ -15,12 +16,11 @@ class OperationResult:
     messages: list[str]
 
 
-def _all_skill_names(config: PathConfig) -> list[str]:
-    names = set()
-    for root in (config.skills_dir, config.disabled_dir):
-        if root.exists():
-            names.update(path.name for path in root.iterdir() if path.is_dir() and not path.name.startswith("."))
-    return sorted(names)
+def _pair_for_managed_dir(config: PathConfig, managed_dir) -> SkillDirPair:
+    for pair in config.skill_dirs:
+        if pair.skills_dir.resolve(strict=False) == managed_dir.resolve(strict=False):
+            return pair
+    raise ValueError(f"no managed pair found for {managed_dir}")
 
 
 def resolve_targets(targets: list[str], skill_names: list[str], aliases: dict[str, str]) -> list[str]:
@@ -43,27 +43,35 @@ def disable_targets(config: PathConfig, targets: list[str], aliases: dict[str, s
 
 
 def _toggle(config: PathConfig, targets: list[str], aliases: dict[str, str], *, enable: bool) -> OperationResult:
-    skill_names = _all_skill_names(config)
+    skills, _warnings = discover_skills(config, aliases)
+    skills_by_name = {skill.name: skill for skill in skills}
+    skill_names = [skill.name for skill in skills]
     changed: list[str] = []
     unchanged: list[str] = []
     missing: list[str] = []
     messages: list[str] = []
-    source_root = config.disabled_dir if enable else config.skills_dir
-    dest_root = config.skills_dir if enable else config.disabled_dir
-    already_root = config.skills_dir if enable else config.disabled_dir
     desired = "ON" if enable else "OFF"
-    for skill in resolve_targets(targets, skill_names, aliases):
-        if (already_root / skill).is_dir():
-            unchanged.append(skill)
-            messages.append(f"{skill} is already {desired}")
+    for skill_name in resolve_targets(targets, skill_names, aliases):
+        skill = skills_by_name.get(skill_name)
+        if skill is None:
+            missing.append(skill_name)
+            messages.append(f"{skill_name} skill not found")
             continue
-        source = source_root / skill
+        if (enable and skill.status == "on") or (not enable and skill.status == "off"):
+            unchanged.append(skill_name)
+            messages.append(f"{skill_name} is already {desired}")
+            continue
+
+        pair = _pair_for_managed_dir(config, skill.managed_dir)
+        source_root = pair.disabled_dir if enable else pair.skills_dir
+        dest_root = pair.skills_dir if enable else pair.disabled_dir
+        source = source_root / skill_name
         if source.is_dir():
             dest_root.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(source), str(dest_root / skill))
-            changed.append(skill)
-            messages.append(f"{skill} turned {desired}")
+            shutil.move(str(source), str(dest_root / skill_name))
+            changed.append(skill_name)
+            messages.append(f"{skill_name} turned {desired}")
             continue
-        missing.append(skill)
-        messages.append(f"{skill} skill not found")
+        missing.append(skill_name)
+        messages.append(f"{skill_name} skill not found")
     return OperationResult(changed=changed, unchanged=unchanged, missing=missing, messages=messages)
