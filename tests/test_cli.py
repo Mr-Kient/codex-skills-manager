@@ -201,3 +201,30 @@ def test_alias_file_override_still_uses_explicit_alias_file(monkeypatch, fake_co
     assert result.exit_code == 0
     assert explicit_aliases.read_text(encoding="utf-8") == "one group\n"
     assert not (project / "skill_aliases").exists()
+
+
+def test_removed_dir_disappears_from_ls_and_alias_ls(monkeypatch, tmp_path):
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    managed = tmp_path / "agents" / "skills"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("HOME", str(home))
+    (project / "managed_dirs").write_text(f"{managed}\n", encoding="utf-8")
+    (project / "skill_aliases").write_text("agent-one group\n", encoding="utf-8")
+    skill_dir = managed / "agent-one"
+    skill_dir.mkdir(parents=True)
+    skill_dir.joinpath("SKILL.md").write_text("---\nname: agent-one\ndescription: Agent.\n---\n", encoding="utf-8")
+
+    remove_result = runner.invoke(app, ["--remove-dir", str(managed)])
+    ls_result = runner.invoke(app, ["ls"])
+    alias_result = runner.invoke(app, ["alias", "ls"])
+    off_result = runner.invoke(app, ["off", "agent-one"])
+
+    assert remove_result.exit_code == 0
+    assert ls_result.exit_code == 0
+    assert alias_result.exit_code == 0
+    assert off_result.exit_code == 1
+    assert "agent-one" not in ls_result.output
+    assert "agent-one" not in alias_result.output
+    assert "agent-one skill not found" in off_result.output
