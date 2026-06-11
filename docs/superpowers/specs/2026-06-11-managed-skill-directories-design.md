@@ -19,6 +19,8 @@ the same parent directory. For example, `~/.agents/skills` maps to
 - Always include `~/.codex/skills` in discovery and operations.
 - Let `skills --add-dir ~/.agents/skills` add a managed directory permanently
   for the current project directory.
+- Let `skills --remove-dir ~/.agents/skills` remove a managed directory from the
+  current project after restoring disabled skills.
 - Create both the enabled directory and its sibling disabled directory when a
   directory is added.
 - Discover enabled and disabled skills across all managed directory pairs.
@@ -58,6 +60,15 @@ single-pair override behavior for compatibility. Extra managed directories from
 `./managed_dirs` are used only when the command is running with default path
 resolution.
 
+The default alias file also moves to the current project directory:
+`./skill_aliases`. This single project-local alias file applies to all managed
+directories, including the always-managed `~/.codex/skills` directory and any
+extra directories from `./managed_dirs`.
+
+The `--alias-file` option remains as an advanced compatibility override. When
+provided, that command reads from and writes to the explicit alias file path
+instead of `./skill_aliases`.
+
 ## Directory Pairs
 
 Each enabled directory maps to a disabled directory by replacing a final
@@ -96,6 +107,30 @@ The enabled and disabled paths for each pair must resolve to different paths.
 
 `--add-dir` does not run a subcommand. It exits successfully after updating the
 project-local configuration.
+
+## `--remove-dir`
+
+`skills --remove-dir <path>` is a persistent unmanagement action. It:
+
+1. Expands the provided path.
+2. Refuses to remove the always-managed default directory, `~/.codex/skills`.
+3. Derives the sibling disabled directory.
+4. Moves every skill directory from the sibling disabled directory back into the
+   enabled directory.
+5. Removes the enabled directory entry from `./managed_dirs`.
+6. Deletes the sibling disabled directory after it has been restored and is
+   empty.
+7. Prints a short message describing what changed.
+
+If a disabled skill cannot be restored because the enabled directory already has
+a skill with the same name, the command fails before updating `./managed_dirs`.
+The conflicting disabled skill remains in place, and the disabled directory is
+not deleted. This avoids overwriting user data.
+
+After a directory is removed from `./managed_dirs`, `skills ls` and
+`skills alias ls` no longer show skills from that directory. Alias entries for
+those skill names may remain in `./skill_aliases`, but they have no effect until
+a matching skill is discovered again.
 
 ## Discovery
 
@@ -167,6 +202,10 @@ deep-agents-core:
 
 - Duplicate managed directory entries are ignored when writing with
   `--add-dir`.
+- Removing the default `~/.codex/skills` directory is rejected because it is
+  always managed.
+- Removing a directory with disabled restore conflicts is rejected without
+  changing `./managed_dirs`.
 - Duplicate discovered skill names produce warnings and keep the first copy by
   managed directory priority.
 - Invalid `managed_dirs` rows are limited to lines with extra whitespace
@@ -181,6 +220,13 @@ Tests will cover:
 
 - Reading `managed_dirs` with comments, blank lines, and duplicate paths.
 - `--add-dir` writes `./managed_dirs` and creates enabled and disabled
+  directories.
+- `--remove-dir` restores disabled skills, removes the enabled directory from
+  `./managed_dirs`, and deletes the empty sibling disabled directory.
+- `--remove-dir` rejects `~/.codex/skills`.
+- `--remove-dir` rejects restore conflicts without changing `./managed_dirs`.
+- Removed directories no longer appear in `skills ls` or `skills alias ls`.
+- Project-local `./skill_aliases` is the default alias file for all managed
   directories.
 - Default `~/.codex/skills` remains managed without `managed_dirs`.
 - Discovery across multiple managed pairs.
