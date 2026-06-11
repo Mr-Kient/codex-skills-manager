@@ -9,11 +9,12 @@ from rich.table import Table
 from codex_skills_cli.aliases import group_by_alias, is_alias_safe, read_aliases, write_aliases
 from codex_skills_cli.discovery import discover_skills
 from codex_skills_cli.interactive import select_alias, select_skills
+from codex_skills_cli.managed_dirs import add_managed_dir, remove_managed_dir
 from codex_skills_cli.operations import disable_targets, enable_targets
 from codex_skills_cli.paths import PathConfig, resolve_paths
 from codex_skills_cli.shell import shell_init
 
-app = typer.Typer(help="Manage external Codex skills and aliases.")
+app = typer.Typer(help="Manage external Codex skills and aliases.", invoke_without_command=True)
 alias_app = typer.Typer(help="Manage skill aliases.", invoke_without_command=True)
 shell_app = typer.Typer(help="Generate shell integration.")
 app.add_typer(alias_app, name="alias")
@@ -27,12 +28,35 @@ def main(
     skills_dir: Path | None = typer.Option(None, "--skills-dir"),
     disabled_dir: Path | None = typer.Option(None, "--disabled-dir"),
     alias_file: Path | None = typer.Option(None, "--alias-file"),
+    add_dir: Path | None = typer.Option(None, "--add-dir"),
+    remove_dir: Path | None = typer.Option(None, "--remove-dir"),
 ) -> None:
     """Manage external Codex skills and aliases."""
     ctx.obj = {"skills_dir": skills_dir, "disabled_dir": disabled_dir, "alias_file": alias_file}
+    if add_dir is not None and remove_dir is not None:
+        raise typer.BadParameter("use only one of --add-dir or --remove-dir")
+    if add_dir is not None:
+        config, path_warnings = _config(ctx)
+        for warning in path_warnings:
+            console.print(f"warning: {warning}", style="yellow")
+        result = add_managed_dir(config.managed_dirs_file, add_dir)
+        for message in result.messages:
+            console.print(message)
+        raise typer.Exit(1 if result.error else 0)
+    if remove_dir is not None:
+        config, path_warnings = _config(ctx)
+        for warning in path_warnings:
+            console.print(f"warning: {warning}", style="yellow")
+        result = remove_managed_dir(config.managed_dirs_file, config.skills_dir, remove_dir)
+        for message in result.messages:
+            console.print(message)
+        raise typer.Exit(1 if result.error else 0)
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 
-def _config(ctx: typer.Context) -> PathConfig:
+def _config(ctx: typer.Context) -> tuple[PathConfig, list[str]]:
     return resolve_paths(
         skills_dir=ctx.obj.get("skills_dir"),
         disabled_dir=ctx.obj.get("disabled_dir"),
@@ -49,10 +73,10 @@ def alias_main(ctx: typer.Context) -> None:
 
 @app.command("ls")
 def list_skills(ctx: typer.Context) -> None:
-    config = _config(ctx)
+    config, path_warnings = _config(ctx)
     aliases, warnings = read_aliases(config.alias_file)
     skills, discovery_warnings = discover_skills(config, aliases)
-    for warning in [*warnings, *discovery_warnings]:
+    for warning in [*path_warnings, *warnings, *discovery_warnings]:
         console.print(f"warning: {warning}", style="yellow")
     table = Table()
     table.add_column("ALIAS")
@@ -66,8 +90,10 @@ def list_skills(ctx: typer.Context) -> None:
 
 @app.command("on")
 def on(ctx: typer.Context, targets: list[str] = typer.Argument(...)) -> None:
-    config = _config(ctx)
+    config, path_warnings = _config(ctx)
     aliases, _ = read_aliases(config.alias_file)
+    for warning in path_warnings:
+        console.print(f"warning: {warning}", style="yellow")
     result = enable_targets(config, targets, aliases)
     for message in result.messages:
         console.print(message)
@@ -78,8 +104,10 @@ def on(ctx: typer.Context, targets: list[str] = typer.Argument(...)) -> None:
 
 @app.command("off")
 def off(ctx: typer.Context, targets: list[str] = typer.Argument(...)) -> None:
-    config = _config(ctx)
+    config, path_warnings = _config(ctx)
     aliases, _ = read_aliases(config.alias_file)
+    for warning in path_warnings:
+        console.print(f"warning: {warning}", style="yellow")
     result = disable_targets(config, targets, aliases)
     for message in result.messages:
         console.print(message)
@@ -90,8 +118,10 @@ def off(ctx: typer.Context, targets: list[str] = typer.Argument(...)) -> None:
 
 @alias_app.command("ls")
 def alias_ls(ctx: typer.Context) -> None:
-    config = _config(ctx)
+    config, path_warnings = _config(ctx)
     aliases, _ = read_aliases(config.alias_file)
+    for warning in path_warnings:
+        console.print(f"warning: {warning}", style="yellow")
     skills, _ = discover_skills(config, aliases)
     grouped = group_by_alias([skill.name for skill in skills], aliases)
     for alias_name, members in grouped.items():
@@ -100,8 +130,10 @@ def alias_ls(ctx: typer.Context) -> None:
 
 @alias_app.command("set")
 def alias_set(ctx: typer.Context) -> None:
-    config = _config(ctx)
+    config, path_warnings = _config(ctx)
     aliases, _ = read_aliases(config.alias_file)
+    for warning in path_warnings:
+        console.print(f"warning: {warning}", style="yellow")
     skills, _ = discover_skills(config, aliases)
     alias_name, _created = select_alias(sorted(set(aliases.values())))
     if not alias_name:
@@ -122,8 +154,10 @@ def alias_edit(ctx: typer.Context) -> None:
 
 @alias_app.command("unset")
 def alias_unset(ctx: typer.Context) -> None:
-    config = _config(ctx)
+    config, path_warnings = _config(ctx)
     aliases, _ = read_aliases(config.alias_file)
+    for warning in path_warnings:
+        console.print(f"warning: {warning}", style="yellow")
     skills, _ = discover_skills(config, aliases)
     selected = select_skills([skill.name for skill in skills if skill.name in aliases])
     for skill_name in selected:
@@ -133,7 +167,9 @@ def alias_unset(ctx: typer.Context) -> None:
 
 @shell_app.command("init")
 def shell_init_command(ctx: typer.Context) -> None:
-    config = _config(ctx)
+    config, path_warnings = _config(ctx)
     aliases, _ = read_aliases(config.alias_file)
+    for warning in path_warnings:
+        console.print(f"warning: {warning}", style="yellow")
     skills, _ = discover_skills(config, aliases)
     console.print(shell_init([skill.effective_alias for skill in skills]), end="")

@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 
 MANAGED_DIRS_FILENAME = "managed_dirs"
+
+
+@dataclass(frozen=True)
+class ManagedDirActionResult:
+    changed: bool
+    error: bool
+    messages: list[str]
 
 
 def derive_disabled_dir(skills_dir: Path) -> Path:
@@ -64,3 +73,72 @@ def write_managed_dirs(managed_dirs_file: Path, paths: list[Path]) -> None:
         handle.write(content)
         tmp_name = handle.name
     os.replace(tmp_name, managed_dirs_file)
+
+
+def add_managed_dir(managed_dirs_file: Path, skills_dir: Path) -> ManagedDirActionResult:
+    enabled = skills_dir.expanduser()
+    disabled = derive_disabled_dir(enabled)
+    current, warnings = read_managed_dirs(managed_dirs_file)
+    enabled.mkdir(parents=True, exist_ok=True)
+    disabled.mkdir(parents=True, exist_ok=True)
+    if _path_key(enabled) in {_path_key(path) for path in current}:
+        return ManagedDirActionResult(
+            changed=False,
+            error=False,
+            messages=[*warnings, f"{enabled} is already managed"],
+        )
+    write_managed_dirs(managed_dirs_file, [*current, enabled])
+    return ManagedDirActionResult(
+        changed=True,
+        error=False,
+        messages=[*warnings, f"added managed skills directory: {enabled}"],
+    )
+
+
+def remove_managed_dir(managed_dirs_file: Path, default_skills_dir: Path, skills_dir: Path) -> ManagedDirActionResult:
+    enabled = skills_dir.expanduser()
+    disabled = derive_disabled_dir(enabled)
+    if _path_key(enabled) == _path_key(default_skills_dir):
+        return ManagedDirActionResult(
+            changed=False,
+            error=True,
+            messages=[f"cannot remove default managed skills directory: {enabled}"],
+        )
+
+    current, warnings = read_managed_dirs(managed_dirs_file)
+    remaining = [path for path in current if _path_key(path) != _path_key(enabled)]
+    if len(remaining) == len(current):
+        return ManagedDirActionResult(
+            changed=False,
+            error=False,
+            messages=[*warnings, f"{enabled} is not managed"],
+        )
+
+    restore_sources = sorted(path for path in disabled.iterdir() if path.is_dir()) if disabled.exists() else []
+    conflicts = [path.name for path in restore_sources if (enabled / path.name).exists()]
+    if conflicts:
+        return ManagedDirActionResult(
+            changed=False,
+            error=True,
+            messages=[*warnings, f"cannot remove {enabled}; restore conflicts: {', '.join(conflicts)}"],
+        )
+
+    enabled.mkdir(parents=True, exist_ok=True)
+    restored: list[str] = []
+    for source in restore_sources:
+        shutil.move(str(source), str(enabled / source.name))
+        restored.append(source.name)
+
+    write_managed_dirs(managed_dirs_file, remaining)
+
+    removed_disabled = False
+    if disabled.exists() and not any(disabled.iterdir()):
+        disabled.rmdir()
+        removed_disabled = True
+
+    messages = [*warnings, f"removed managed skills directory: {enabled}"]
+    if restored:
+        messages.append(f"restored disabled skills: {', '.join(restored)}")
+    if removed_disabled:
+        messages.append(f"removed disabled directory: {disabled}")
+    return ManagedDirActionResult(changed=True, error=False, messages=messages)
