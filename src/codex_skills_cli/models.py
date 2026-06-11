@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-SkillStatus = Literal["on", "off", "missing"]
+SkillStatus = Literal["on", "off"]
 
 
 @dataclass(frozen=True)
@@ -15,3 +15,4 @@ class Skill:
     effective_alias: str
     description: str
     path: Path | None
+    managed_dir: Path

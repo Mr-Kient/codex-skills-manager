@@ -28,18 +28,18 @@ def _iter_skill_dirs(root: Path) -> list[Path]:
 
 
 def discover_skills(config: PathConfig, aliases: dict[str, str]) -> tuple[list[Skill], list[str]]:
-    found: dict[str, tuple[Path, SkillStatus]] = {}
+    found: dict[str, tuple[Path, SkillStatus, Path]] = {}
     warnings: list[str] = []
-    for status, root in (("on", config.skills_dir), ("off", config.disabled_dir)):
-        for skill_dir in _iter_skill_dirs(root):
-            if not (skill_dir / "SKILL.md").exists():
-                continue
-            if skill_dir.name in found:
-                warnings.append(
-                    f"skill '{skill_dir.name}' exists in both enabled and disabled directories; using enabled copy"
-                )
-                continue
-            found[skill_dir.name] = (skill_dir, status)  # type: ignore[assignment]
+    for pair in config.skill_dirs:
+        for status, root in (("on", pair.skills_dir), ("off", pair.disabled_dir)):
+            for skill_dir in _iter_skill_dirs(root):
+                if not (skill_dir / "SKILL.md").exists():
+                    continue
+                if skill_dir.name in found:
+                    kept_path = found[skill_dir.name][0]
+                    warnings.append(f"skill '{skill_dir.name}' at {skill_dir} ignored; already using {kept_path}")
+                    continue
+                found[skill_dir.name] = (skill_dir, status, pair.skills_dir)  # type: ignore[assignment]
     skills = [
         Skill(
             name=name,
@@ -48,7 +48,8 @@ def discover_skills(config: PathConfig, aliases: dict[str, str]) -> tuple[list[S
             effective_alias=alias_for(name, aliases),
             description=_description(path),
             path=path,
+            managed_dir=managed_dir,
         )
-        for name, (path, status) in found.items()
+        for name, (path, status, managed_dir) in found.items()
     ]
     return sorted(skills, key=lambda skill: skill.name), warnings

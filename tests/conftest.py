@@ -10,9 +10,8 @@ def fake_codex_home(tmp_path):
 
 
 @pytest.fixture
-def make_skill(fake_codex_home):
-    def _make_skill(name: str, *, status: str, description: str):
-        root = fake_codex_home / ("skills" if status == "on" else "skills_disabled")
+def create_skill():
+    def _create_skill(root, name: str, *, description: str):
         skill_dir = root / name
         skill_dir.mkdir(parents=True)
         skill_dir.joinpath("SKILL.md").write_text(
@@ -20,5 +19,14 @@ def make_skill(fake_codex_home):
             encoding="utf-8",
         )
         return skill_dir
+
+    return _create_skill
+
+
+@pytest.fixture
+def make_skill(fake_codex_home, create_skill):
+    def _make_skill(name: str, *, status: str, description: str):
+        root = fake_codex_home / ("skills" if status == "on" else "skills_disabled")
+        return create_skill(root, name, description=description)
 
     return _make_skill
