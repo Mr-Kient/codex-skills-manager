@@ -1,0 +1,303 @@
+_skills_enabled_dir() {
+    echo "$HOME/.codex/skills"
+}
+
+_skills_disabled_dir() {
+    echo "$HOME/.codex/skills_disabled"
+}
+
+_skills_alias_config_file() {
+    echo "$HOME/.codex/skill_aliases"
+}
+
+_skills_is_alias_safe() {
+    local skill="$1"
+
+    case "$skill" in
+        ""|*[!A-Za-z0-9._-]*)
+            return 1
+            ;;
+    esac
+
+    return 0
+}
+
+_skills_all() {
+    local enabled_dir="$(_skills_enabled_dir)"
+    local disabled_dir="$(_skills_disabled_dir)"
+    local -A seen
+    local -a skill_dirs
+    local dir skill nullglob_was_set=0
+
+    shopt -q nullglob && nullglob_was_set=1
+    shopt -s nullglob
+    skill_dirs=(
+        "$enabled_dir"/*/
+        "$disabled_dir"/*/
+    )
+    [ "$nullglob_was_set" -eq 1 ] || shopt -u nullglob
+
+    for dir in "${skill_dirs[@]}"; do
+        dir="${dir%/}"
+        skill="${dir##*/}"
+        case "$skill" in
+            .*|"")
+                continue
+                ;;
+        esac
+        [ -f "$dir/SKILL.md" ] || continue
+        [ -z "${seen[$skill]}" ] || continue
+        seen[$skill]=1
+        printf '%s\n' "$skill"
+    done
+}
+
+_skills_status() {
+    local skill="$1"
+    local enabled_dir="$(_skills_enabled_dir)"
+    local disabled_dir="$(_skills_disabled_dir)"
+
+    if [ -d "$enabled_dir/$skill" ]; then
+        echo "on"
+        return 0
+    fi
+    if [ -d "$disabled_dir/$skill" ]; then
+        echo "off"
+        return 0
+    fi
+
+    echo "missing"
+}
+
+_skills_description_raw() {
+    local skill="$1"
+    local enabled_dir="$(_skills_enabled_dir)"
+    local disabled_dir="$(_skills_disabled_dir)"
+    local skill_file=""
+    local description=""
+
+    if [ -f "$enabled_dir/$skill/SKILL.md" ]; then
+        skill_file="$enabled_dir/$skill/SKILL.md"
+    elif [ -f "$disabled_dir/$skill/SKILL.md" ]; then
+        skill_file="$disabled_dir/$skill/SKILL.md"
+    fi
+
+    if [ -z "$skill_file" ]; then
+        echo "No SKILL.md found"
+        return 0
+    fi
+
+    description="$(
+        awk '/^description:[[:space:]]*/ {
+            sub(/^description:[[:space:]]*/, "")
+            print
+            exit
+        }' "$skill_file"
+    )"
+    description="${description#\"}"
+    description="${description%\"}"
+    description="${description#\'}"
+    description="${description%\'}"
+
+    if [ -z "$description" ]; then
+        return 0
+    fi
+
+    echo "$description"
+}
+
+_skills_description() {
+    local skill="$1"
+    local description=""
+
+    description="$(_skills_description_raw "$skill")"
+
+    if [ -z "$description" ]; then
+        echo "No description found"
+        return 0
+    fi
+
+    case "$description" in
+        *". "*) description="${description%%. *}." ;;
+    esac
+    if [ "${#description}" -gt 110 ]; then
+        description="${description:0:107}..."
+    fi
+
+    echo "$description"
+}
+
+_skills_configured_alias() {
+    local skill="$1"
+    local config_file="$(_skills_alias_config_file)"
+
+    [ -f "$config_file" ] || return 0
+
+    awk -v skill="$skill" '
+        /^[[:space:]]*(#|$)/ { next }
+        $1 == skill {
+            print $2
+            exit
+        }
+    ' "$config_file"
+}
+
+_skills_alias_for() {
+    local skill="$1"
+    local configured_alias=""
+
+    configured_alias="$(_skills_configured_alias "$skill")"
+    if [ -n "$configured_alias" ]; then
+        echo "$configured_alias"
+        return 0
+    fi
+
+    echo "$skill"
+}
+
+_skills_members_for_alias() {
+    local alias_name="$1"
+    local skill skill_alias
+
+    while IFS= read -r skill; do
+        skill_alias="$(_skills_alias_for "$skill")"
+        [ "$skill_alias" = "$alias_name" ] || continue
+        printf '%s\n' "$skill"
+    done < <(_skills_all)
+}
+
+_skills_target_members() {
+    local target="$1"
+    local members=""
+
+    members="$(_skills_members_for_alias "$target")"
+    if [ -n "$members" ]; then
+        printf '%s\n' "$members"
+        return 0
+    fi
+
+    printf '%s\n' "$target"
+}
+
+_skill_on() {
+    local target="$1"
+    local enabled_dir="$(_skills_enabled_dir)"
+    local disabled_dir="$(_skills_disabled_dir)"
+    local skill result=0 moved=0
+
+    if [ -z "$target" ]; then
+        echo "usage: skills on <alias-or-skill>" >&2
+        return 2
+    fi
+
+    while IFS= read -r skill; do
+        if [ -d "$enabled_dir/$skill" ]; then
+            echo "$skill is already ON"
+            continue
+        fi
+        if [ -d "$disabled_dir/$skill" ]; then
+            mkdir -p "$enabled_dir" || return 1
+            mv "$disabled_dir/$skill" "$enabled_dir/$skill" || return 1
+            echo "$skill turned ON"
+            moved=1
+            continue
+        fi
+
+        echo "$skill skill not found"
+        result=1
+    done < <(_skills_target_members "$target")
+
+    [ "$moved" -eq 1 ] && echo "restart Codex to reload skills"
+    _skills_refresh_aliases
+    return "$result"
+}
+
+_skill_off() {
+    local target="$1"
+    local enabled_dir="$(_skills_enabled_dir)"
+    local disabled_dir="$(_skills_disabled_dir)"
+    local skill result=0 moved=0
+
+    if [ -z "$target" ]; then
+        echo "usage: skills off <alias-or-skill>" >&2
+        return 2
+    fi
+
+    while IFS= read -r skill; do
+        if [ -d "$disabled_dir/$skill" ]; then
+            echo "$skill is already OFF"
+            continue
+        fi
+        if [ -d "$enabled_dir/$skill" ]; then
+            mkdir -p "$disabled_dir" || return 1
+            mv "$enabled_dir/$skill" "$disabled_dir/$skill" || return 1
+            echo "$skill turned OFF"
+            moved=1
+            continue
+        fi
+
+        echo "$skill skill not found"
+        result=1
+    done < <(_skills_target_members "$target")
+
+    [ "$moved" -eq 1 ] && echo "restart Codex to reload skills"
+    _skills_refresh_aliases
+    return "$result"
+}
+
+_skills_refresh_aliases() {
+    local skill alias_name
+    local -A seen_aliases
+
+    while IFS= read -r skill; do
+        alias_name="$(_skills_alias_for "$skill")"
+        _skills_is_alias_safe "$alias_name" || continue
+        [ -z "${seen_aliases[$alias_name]}" ] || continue
+        seen_aliases[$alias_name]=1
+        alias -- "${alias_name}-on=_skill_on $alias_name"
+        alias -- "${alias_name}-off=_skill_off $alias_name"
+    done < <(_skills_all)
+}
+
+_skills_ls() {
+    local skill skill_alias skill_status description
+
+    _skills_refresh_aliases
+
+    printf "%-24s %-24s %-7s %s\n" "ALIAS" "SKILL" "STATUS" "DESCRIPTION"
+    printf "%-24s %-24s %-7s %s\n" "-----" "-----" "------" "-----------"
+
+    while IFS= read -r skill; do
+        skill_alias="$(_skills_alias_for "$skill")"
+        skill_status="$(_skills_status "$skill")"
+        description="$(_skills_description "$skill")"
+        printf "%-24s %-24s %-7s %s\n" "$skill_alias" "$skill" "$skill_status" "$description"
+    done < <(_skills_all)
+}
+
+skills() {
+    local command="$1"
+
+    case "$command" in
+        ls|list|"")
+            _skills_ls
+            ;;
+        on)
+            shift
+            _skill_on "$1"
+            ;;
+        off)
+            shift
+            _skill_off "$1"
+            ;;
+        refresh)
+            _skills_refresh_aliases
+            ;;
+        *)
+            echo "usage: skills ls | skills on <alias-or-skill> | skills off <alias-or-skill> | skills refresh" >&2
+            return 2
+            ;;
+    esac
+}
+
+_skills_refresh_aliases

@@ -1,0 +1,12 @@
+deep-agents-core langchain
+deep-agents-memory langchain
+deep-agents-orchestration langchain
+framework-selection langchain
+langchain-dependencies langchain
+langchain-fundamentals langchain
+langchain-middleware langchain
+langchain-rag langchain
+langgraph-fundamentals langchain
+langgraph-human-in-the-loop langchain
+langgraph-persistence langchain
+
